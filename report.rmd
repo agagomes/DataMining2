@@ -1,0 +1,427 @@
+---
+title: "Projeto Data mining 2"
+author: "Ângelo Gomes up201703990 Simão Cardoso up201604595 Sónia Rocha up201704679"
+date: "05/06/2021"
+output: word_document
+always_allow_html: yes
+---
+
+```{r, echo=FALSE, results="hide", warning=FALSE,message=FALSE}
+library(readr)
+library(dplyr)
+library(readr)
+library(psych)
+library(tidyr)
+library(ggplot2)
+library(tidyverse)
+library(arules)
+library(arulesViz)
+library(proxy)
+library(recommenderlab)
+library(RColorBrewer)
+library(fields)
+library(ggplot2)
+library(ggpubr)
+
+if(.Platform$OS.type == "windows") withAutoprint({
+  memory.size()
+  memory.size(TRUE)
+  memory.limit()
+})
+memory.limit(size=56000)
+
+originaldata <- read_csv("users_brands.csv")
+help <- read_csv("brand_features.csv")
+users_brands<- as.tibble(originaldata)
+
+```
+## Introduction and Exploratory Data Analysis
+
+  O objetivo deste projeto é comparar diferentes estratégias de recomendação da data set users_brands.csv originado pela farfetch.
+  
+  Inicialmente analisamos e tratamos a informação presente no data set que é constituido por 846490 observação, cada com 7 variaveis distintas.Durante este processo descobrimos que nenhuma observação tinha uma variavel com valor NA, através de `any(is.na(users_brands))`.
+  Através do summary da dataset users_brands, verificamos que as variáveis platform,sequence_id e brand_id deveriam ser do tipo factor, e por isso foram mudadas para tal, assim como a variavel brand_id na data set brand_features.
+```{r, echo=FALSE, results="show", warning=FALSE,message=FALSE}
+users_brands<-users_brands %>% 
+  rename(
+    sequence_id = purchase_date
+  )
+
+
+summary(users_brands)
+summary(help)
+
+users_brands$brand_id <- as.factor(users_brands$brand_id)
+users_brands$platform <- as.factor(users_brands$platform)
+users_brands$sequence_id <- as.factor(users_brands$sequence_id)
+help$brand_id  <- as.factor(help$brand_id)
+
+any(is.na(users_brands)) #false
+any(is.na(help)) #false
+
+
+```
+
+  É também pertinente verificar quantos users distintos, brands,plataformas, países e sequências estão representadas no data set.  
+```{r, echo=FALSE, results="show", warning=FALSE,message=FALSE}
+length(unique(users_brands$user_id)) # number of different users
+length(unique(users_brands$brand_id)) #number of different brands
+length(unique(users_brands$country)) #number of different countrys
+length(unique(users_brands$sequence_id)) #number of different sequences
+length(unique(users_brands$platform)) #number of platforms
+
+```
+  Assim, concluímos que , existem 329213 id's de users , 1771 marcas, 175 países, 231 sequências e 12 plataformas.
+ 
+  Por último visualizamos os gráficos que se seguem de forma a visualizar melhor alguns parametros desta data set.
+
+```{r, echo=FALSE, warning=FALSE,message=FALSE}
+ggplot(users_brands %>% group_by(user_segment) %>%summarise(counts = n()), aes(x = user_segment, y = counts)) +
+  geom_bar(fill = "#96a1e3", stat = "identity") +
+  geom_text(aes(label = counts), vjust = -0.3) + 
+  theme_pubclean()
+
+ggplot(users_brands %>% group_by(perc_sale) %>%summarise(counts = n()), aes(x = perc_sale, y = counts)) +
+  geom_bar(fill = "#96a1e3", stat = "identity") +
+  geom_text(aes(label = counts), vjust = -0.3) + 
+  theme_pubclean()
+
+ggplot(users_brands %>% group_by(platform) %>%summarise(counts = n()), aes(x = platform, y = counts)) +
+  geom_bar(fill = "#96a1e3", stat = "identity") +
+  geom_text(aes(label = counts), vjust = -0.3) + 
+  theme_pubclean()
+
+
+users_brands %>%
+  ggplot(aes(user_segment)) +
+  geom_bar(aes(fill = perc_sale))
+
+users_brands %>%
+  ggplot(aes(platform)) +
+  coord_flip() +
+  geom_bar(aes(fill = user_segment))
+
+users_brands %>%
+  ggplot(aes(platform)) +
+  coord_flip() +
+  geom_bar(aes(fill = perc_sale))
+```
+
+## Recommender Systems
+
+  Nesta fase de desenvolvimento do projeto, foi importante diminuir a data set para user_id e brand_id com maior interação. Assim, antes de escolher esses tais user_id, fizemos uma lista com os brand_id e user_id, à qual transformamos numa variável do tipo transaction, que utilizando a função itemFrequencyPlot() com top(100) das brand_id, conseguimos visualizar melhor quais as brands com maior influencia, assim verificamos que talvez fosse mais eficiente estudar as top 50 brands pois apresentam valores de interação relativamente altos (gráficos abaixo é top(100) e top(50) respetivamente).
+  
+```{r, echo=FALSE, results="hide", plot="show", warning=FALSE,message=FALSE}
+users_brands_n<- users_brands %>% select(user_id,brand_id)
+users_brands_n$user_id<-as.factor(users_brands$user_id) 
+users_brands_n$brand_id<-as.factor(users_brands$brand_id) 
+data<-users_brands_n
+
+TransList <- split(data$brand_id,data$user_id)
+TransMat <- as(TransList, "transactions")
+summary(TransMat)
+
+itemFrequencyPlot(TransMat,topN=100,col=brewer.pal(8,'Pastel2'),cex.names=0.7,main='Relative Item Frequency Plot',type="relative",ylab="Item Frequency (Relative)")
+itemFrequencyPlot(TransMat,topN=50,col=brewer.pal(8,'Pastel2'),cex.names=0.7,main='Relative Item Frequency Plot',type="relative",ylab="Item Frequency (Relative)")
+x <- data %>% 
+    group_by(brand_id) %>%
+    summarise(n()) %>%
+    top_n(50) %>%
+  { filter(data, brand_id %in% .$brand_id) }
+
+
+brm <- as(as.data.frame(x),"binaryRatingMatrix")
+brm_offline<- brm[1:100000,]
+user <- brm[500,]
+getRatingMatrix(brm_offline)
+inspect(getRatingMatrix(brm_offline))
+```
+  De seguida, foi então criada uma data set com essas tais restrições, contendo 436788 observações e 2 variáveis (brand_id, user_id). Foi criada com esta data, uma variável brm do tipo "binaryRatingMatrix", começar assim a task 2 de Recommender Systems.
+  Além disso, foi criada outra variável utilizada para training data , com cerca de aproximadamente 1/4 do tamanho da data brm, para testar os diferentes métodos e familiariazar aos outputs de cada método primeiramente vamos utilizar o user 500 com as diferentes top N recomendações indicadas (1,2,6).
+  Começando com o método Popular:
+```{r, echo=FALSE,results="hide", warning=FALSE,message=FALSE}
+modelPop <- Recommender(brm_offline, "POPULAR")
+```
+```{r, echo=FALSE, results="show", warning=FALSE,message=FALSE}
+recsPOP1 <- predict(modelPop, user, n=1)
+getList(recsPOP1)
+recsPOP2 <- predict(modelPop, user, n=2)
+getList(recsPOP2)
+recsPOP6 <- predict(modelPop, user, n=6)
+getList(recsPOP6)
+```
+
+  Relativamente ao método Association Rules com suporte = 0.003 e nível de confiança = 0.05 (ficando com 69 regras):
+```{r, echo=FALSE, results="hide", warning=FALSE,message=FALSE}
+modelar <- Recommender(brm_offline, "AR", param=list(supp=0.003, conf=0.05))
+```
+
+```{r, echo=FALSE,results="hide", warning=FALSE,message=FALSE}
+getModel(modelar)
+rules <- getModel(modelar)$rule_base
+inspect(rules)
+```
+
+```{r, echo=FALSE,results="show", warning=FALSE,message=FALSE}
+recsAR1 <- predict(modelar, user, n=1)
+getList(recsAR1)
+recsAR2 <- predict(modelar, user, n=2)
+getList(recsAR2)
+recsAR6 <- predict(modelar, user, n=6)
+getList(recsAR6)
+```
+  Relativamente ao método User-Based e Item-Based Collaborative Filtering utilizamos o método cosine para a similaridade entre os items (brands),  e com n (neighborhood) 100 (pois mais baixo que este valor ou não fazia predições ou fazia um número inferior ao requerido).
+  Começando com o método User-Based CF estas foram as predições:
+```{r, echo=FALSE, results="hide", warning=FALSE,message=FALSE}
+modelubcf <- Recommender(brm_offline, "UBCF",parameter=list(method="cosine",nn=100))
+```
+```{r, echo=FALSE, results="true", warning=FALSE,message=FALSE}
+getModel(modelubcf)
+recsUBCF1 <- predict(modelubcf, user, n=1)
+getList(recsUBCF1)
+recsUBCF2 <- predict(modelubcf, user, n=2)
+getList(recsUBCF2)
+recsUBCF6 <- predict(modelubcf, user, n=6)
+getList(recsUBCF6)
+```
+ Para o método Item-Based CF estas foram as predições: 
+```{r, echo=FALSE,results="hide", warning=FALSE,message=FALSE}
+modelibcf <- Recommender(brm_offline, "IBCF",parameter=list(method="cosine",k=100))
+```
+```{r, echo=FALSE, results="true", warning=FALSE,message=FALSE}
+getModel(modelibcf)
+recsIBCF1 <- predict(modelibcf, user, n=1)
+getList(recsIBCF1)
+recsIBCF2 <- predict(modelibcf, user, n=2)
+getList(recsIBCF2)
+recsIBCF6 <- predict(modelibcf, user, n=6)
+getList(recsIBCF6)
+```
+  
+
+  Após fazer as testagens dos diferentes métodos com a offline data, iremos começar por fazer a lista de métodos, que se irá encontrar na variável methods, com as características utilizadas anteriormente:
+
+```{r, echo=TRUE, results="hide", warning=FALSE,message=FALSE}
+methods <- list(
+  "popular" = list(name="POPULAR", param = NULL),
+  "user-based CF" = list(name="UBCF", param = list(method="cosine",nn=100)),
+  "item-based CF" = list(name="IBCF", param = list(method="cosine",k=100)),
+  "ar" = list(name="AR", param = list(supp=0.003, conf=0.05))
+)
+```
+
+  Assim, para seguidamente utilizar o método evaluationScheme, inicialmente procuramos utilizar o valor de given que nos fizesse obter os melhores resultados, chegando à conclusão que obtiamos os melhores resultados com given = 1 pois foram observados os average results para cada um destes valores, e comparados. 
+  
+```{r, echo=FALSE, results="hide", warning=FALSE,message=FALSE}
+set.seed(1)
+brm <- brm[rowCounts(brm)>=4,]
+e1 <- evaluationScheme(brm, method="split", train=0.80, given = 4)
+results1 <- evaluate(e1, methods, type="topNList", n=c(1,2,6))
+
+
+set.seed(2)
+brm <- brm[rowCounts(brm)>=3,]
+e2 <- evaluationScheme(brm, method="split", train=0.80, given = 3)
+results2 <- evaluate(e2, methods, type="topNList", n=c(1,2,6))
+
+
+set.seed(3)
+brm <- brm[rowCounts(brm)>=1,]
+e3 <- evaluationScheme(brm, method="split", train=0.80, given =1)
+results3 <- evaluate(e3, methods, type="topNList", n=c(1,2,6))
+
+avg(results1)
+
+avg(results2)
+
+
+```
+```{r, echo=FALSE, results="hide", warning=FALSE,message=FALSE}
+
+avg(results3)
+
+```  
+  Assim, fizemos algumas observações mais pormenorizadas de cada método com da data known e train para n= 1 , fazendo o seguinte para todos, " model <- Recommender(getData(e3,"train"),...), predict(model,getData(e3,"known"),..".
+  
+```{r, echo=FALSE, results="hide", warning=FALSE,message=FALSE}
+model1 <- Recommender(getData(e3,"train"), "AR",param = list(supp=0.003, conf=0.05))
+preds1 <- predict(model1,getData(e3,"known"),n=1)
+getList(preds1)
+
+
+model2 <- Recommender(getData(e3,"train"), "POPULAR")
+preds2 <- predict(model2,getData(e3,"known"),n=1)
+getList(preds2)
+
+
+model3 <- Recommender(getData(e3,"train"), "UBCF",param = list(method="cosine",nn=10))
+preds3 <- predict(model3,getData(e3,"known"),n=1)
+getList(preds3)
+
+model4 <- Recommender(getData(e3,"train"), "IBCF", param = list(method="cosine",k=10))
+preds4 <- predict(model4,getData(e3,"known"),n=1)
+getList(preds4)
+```  
+  
+  Dado estas informações este foi o resultado do plot de ROC onde o TPR ficou com no máximo 30%, onde o melhor método foi o Association Rules, de seguida o Popular, o Item-based e o pior foi User-based CF:
+```{r, echo=FALSE, results="show", plot="show",warning=FALSE,message=FALSE}
+plot(results3,annotate=TRUE)
+```  
+  E este o resultado do plot das curvas de precision/recall, onde os métodos Associaton Rules e Item-based CF com um valores de recall mais baixos quase alcançaram valores de 25% de precision mas ambos descem esta precision ao longo que o recall aumenta para valores prósimos de 20% , o método mais estável no entanto é o Popular que ao longo dos valores de recall mantêm-se por volta dos 18% e por fim uma vez mais o método User-based CF é o que tem pior precisão com cerca de 12% no geral aproximadamente:
+```{r, echo=FALSE, results="show", plot="show",warning=FALSE,message=FALSE}
+plot(results3, "prec/rec", annotate=TRUE)
+```   
+
+## New Contextual Approach and Conclusions
+  
+  Por fim, de forma a melhorar estas percentagens obtidas, decidimos fazer uma abordagem contextual diferente, utilizando algumas das restantes variáveis na dataset. 
+  Esta abordagem consiste em limitar a database relativamente ao país, sales e plataformas com mais influência, e só depois fazer as predições de brand_id sobre user_id, além disso, limitamos ainda mais o número de brand para em vez de top50 para top20 para ficar com valores ainda mais influentes. Para cada uma destas variáveis fizemos o mesmo que fizemos na primeira task, colocamos numa lista o user_id e a variável em questao, passando para uma variável do tipo transaction, e por fim fazer um itemFrequencyPlot para cada uma destas relações (user_id <-> country / user_id <-> perc_sales / user_id <-> plataformas).
+  De seguida iremos mostrar os Frequency plot para cada uma destas relações, começando por user_id e country, de seguida user_id e perc_sales e por fim user_id e platfrom.
+  
+```{r, echo=FALSE, results="hide", plot="show", warning=FALSE,message=FALSE}
+users_count<- users_brands %>% select(user_id,country)
+users_count$user_id<-as.factor(users_brands$user_id) 
+users_count$country<-as.factor(users_brands$country) 
+data2<-users_count
+
+TransList <- split(data2$country,data2$user_id)
+TransMat <- as(TransList, "transactions")
+summary(TransMat)
+
+itemFrequencyPlot(TransMat,topN=50,col=brewer.pal(8,'Pastel2'),main='Absolute Item Frequency Plot',type="absolute",ylab="Item Frequency (Absolute)")
+#conclusão , os top 10 country são dos mais influentes
+```
+
+ Após a visualização deste plot, verificamos que no top 50 country tem vários países com menos influencia e com uma frequencia absoluta relativamente baixa, assim iremos utilizar na data que iremos fazer as predições, o top 10 dos países.   
+  
+  Este é o plot para top5 de perc_sales:
+```{r, echo=FALSE, results="hide", plot="show", warning=FALSE,message=FALSE}
+users_count<- users_brands %>% select(user_id,perc_sale)
+users_count$user_id<-as.factor(users_brands$user_id) 
+users_count$perc_sale<-as.factor(users_brands$perc_sale) 
+data2<-users_count
+
+TransList <- split(data2$perc_sale,data2$user_id)
+TransMat <- as(TransList, "transactions")
+summary(TransMat)
+
+itemFrequencyPlot(TransMat,topN=5,col=brewer.pal(8,'Pastel2'),main='Absolute Item Frequency Plot',type="absolute",ylab="Item Frequency (Absolute)")
+```
+  Como se pode verificar, as primeiras duas colunas de 0.0 e (25,50] têem muti mais aferência, e por isso decidimos utilizar na data o top2 de perc_sale.
+  
+  Por fim este é o gráfico de platforms:
+  
+```{r, echo=FALSE, results="hide", plot="show", warning=FALSE,message=FALSE}
+users_count<- users_brands %>% select(user_id,platform)
+users_count$user_id<-as.factor(users_brands$user_id) 
+users_count$platform<-as.factor(users_brands$platform) 
+data2<-users_count
+
+TransList <- split(data2$platform,data2$user_id)
+TransMat <- as(TransList, "transactions")
+summary(TransMat)
+
+itemFrequencyPlot(TransMat,topN=5,col=brewer.pal(8,'Pastel2'),main='Absolute Item Frequency Plot',type="absolute",ylab="Item Frequency (Absolute)")
+```
+  Assim, concluimos que as 2 primeiras plataformas são as mais influentes e fazem uma grande diferencia a níveis de frequencia em relação às restantes, iremos utilizar assim o top2 de plataformas.
+  
+  Após fazer a data reduction de uma variável que continha user_id, brand_id, country, perc_sales e plataformas com a seguinte ordem primeiro limitar esta data para top(20) de brand_id -> top(10) country -> top(2) perc_sale -> top(2) platfrorm.
+  
+  Fizemos então uma variável contendo os métodos com as seguintes características, em User-based CF e Item-based CF , o método cosine com nn/k = 100, e em Association Rules, support = 0.003 e confidence level de 0.06. 
+  De seguida, antes de fazer o ROC plot e precision/recall plot, foi importante encontrar qual o valor de given ideal na funão de Evaluation Scheme com train = 0.80, e por isso foi testado os resultados com given=3,2 e 1. Onde os resultados que se seguem a seguir, são o average results em given=1.
+  
+```{r, echo=FALSE, results="hide", warning=FALSE,message=FALSE} 
+### DATABASE REDUCTION  ###
+users_final<- users_brands %>% select(user_id,brand_id,country,perc_sale,platform)
+users_final$user_id<-as.factor(users_brands$user_id)
+users_final$brand_id<-as.factor(users_brands$brand_id) 
+users_final$country<-as.factor(users_brands$country)
+users_final$perc_sale<-as.factor(users_brands$perc_sale)
+users_final$platform<-as.factor(users_brands$platform) 
+
+
+x <- users_final %>% 
+  group_by(brand_id) %>%
+  summarise(n()) %>%
+  top_n(20) %>%
+  { filter(users_final, brand_id %in% .$brand_id) } #top 20 brands
+
+x <- x %>% 
+  group_by(country) %>%
+  summarise(n()) %>%
+  top_n(10) %>%
+  { filter(x, country %in% .$country) }  #top 10 country
+
+x <- x %>% 
+  group_by(perc_sale) %>%
+  summarise(n()) %>%
+  top_n(2) %>%
+  { filter(x, perc_sale %in% .$perc_sale) } #top 2 sale
+
+x <- x %>% 
+  group_by(platform) %>%
+  summarise(n()) %>%
+  top_n(2) %>%
+  { filter(x, platform %in% .$platform) } #top 2 platform
+
+
+# ficar apenas com user_id e brand_id
+x[3] <- NULL 
+x[3] <- NULL 
+x[3] <- NULL
+
+
+
+#Testar se houve melhorias-> Houve melhorias
+
+brm <- as(as.data.frame(x),"binaryRatingMatrix")
+
+methods <- list(
+  "popular" = list(name="POPULAR", param = NULL),
+  "user-based CF" = list(name="UBCF", param = list(method="cosine",nn=100)),
+  "item-based CF" = list(name="IBCF", param = list(method="cosine",k=100)),
+  "ar" = list(name="AR", param = list(supp=0.003, conf=0.06))
+)
+```
+  
+```{r, echo=FALSE, results="hide", warning=FALSE,message=FALSE}
+set.seed(2)
+brm <- brm[rowCounts(brm)>=3,]
+e2 <- evaluationScheme(brm, method="split", train=0.80, given = 3)
+results2 <- evaluate(e2, methods, type="topNList", n=c(1,2,6))
+
+set.seed(4)
+brm <- brm[rowCounts(brm)>=2,]
+e3 <- evaluationScheme(brm, method="split", train=0.80, given =2)
+results3 <- evaluate(e3, methods, type="topNList", n=c(1,2,6))
+
+set.seed(3)
+brm <- brm[rowCounts(brm)>=1,]
+e3 <- evaluationScheme(brm, method="split", train=0.80, given =1)
+results4 <- evaluate(e3, methods, type="topNList", n=c(1,2,6))
+
+avg(results2)
+
+avg(results3)
+
+```
+```{r, echo=FALSE, results="hide", warning=FALSE,message=FALSE}
+
+avg(results4)
+```  
+  Estes foram os resultados dos plots ROC e precision/recall respetivamente:
+  
+```{r, echo=FALSE, results="hide",plot="show",warning=FALSE,message=FALSE}
+plot(results4,annotate=TRUE)
+plot(results4, "prec/rec", annotate=TRUE)
+```   
+  
+  Assim, concluímos que houve melhoria relativamente aos plots feitos sem estas limitações, todos os métodos no plot de ROC melhoraram as suas percentagens , atingindo todos valores acima de 40% com a exceção de User-based CF que ficou perto mas não ultrapassou , o User-based CF apesar de continuar o pior, melhorou as suas percentagens de aproximadamente 12% para 40%. 
+  No precision/recall também houve melhoria, nos métodos Association Rules e Item-based CF que inicialmente desciam muito os valores de precisão ao longo que o recall aumentava, agora essa descida foi atenuada e por isso mantendo valores de no geral sempre acima ou igual a 20%, o método Popular agora com precisão que chega a 20% e mantém-se em valores próximos a este , anteriormente não chegava a estes valores. 
+  Por fim, User-based CF obteve a maior melhoria , agora com percentagens a chegar aos 20% uma melhoria de aproximadamente no 12%  (no máximo) relativamente ao calculado antes.
+  
+  Conlcuímos assim, que o método que se adequa mais ao que foi feito é o Association rules, manteve tanto na task2 como na task3, valores de resultados sempre melhores aos dos restantes métodos. Assim concluímos este trabalho, o objetivo no futuro era conseguir utilizar a dataset de brand_features para uma nova abordagem contextual e obter melhores resultados.
+  
+
+
+
